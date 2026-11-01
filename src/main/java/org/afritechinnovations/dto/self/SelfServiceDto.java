@@ -23,7 +23,8 @@ public final class SelfServiceDto {
 
     public record TeacherClass(Long classId, String className, String levelName, Long schoolId, String schoolName,
                                Long academicYearId, String academicYearLabel, boolean currentYear,
-                               int studentCount, List<TeacherSubject> subjects) {
+                               int studentCount, List<TeacherSubject> subjects,
+                               LocalDate academicYearStartDate, LocalDate academicYearEndDate) {
     }
 
     public record RosterStudent(Long studentId, String fullName, String registrationNumber, String gender,

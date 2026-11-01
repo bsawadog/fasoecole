@@ -15,6 +15,10 @@ import java.time.LocalDate;
 @Builder
 public class Attendance {
 
+    @Version
+    @Builder.Default
+    private Long version = 0L;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

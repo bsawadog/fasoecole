@@ -9,19 +9,29 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
+import com.fasterxml.jackson.core.type.TypeReference;
+import org.afritechinnovations.security.AccessGuard;
+import org.afritechinnovations.service.communication.MessageDeliveryService;
 
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 public class ParentPortalController {
     private final ParentPortalService service;
+    private final AccessGuard guard;
+    private final MessageDeliveryService delivery;
 
     @GetMapping("/me/teacher/classes/{classId}/portal/posts")
     public List<Post> teacherPosts(@PathVariable Long classId,@RequestParam Kind kind) { return service.teacherPosts(classId,kind); }
     @PostMapping(value="/me/teacher/classes/{classId}/portal/posts",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public Post teacherPublish(@PathVariable Long classId,@Valid @RequestPart("request") PostRequest request,
-            @RequestPart(value="files",required=false) List<MultipartFile> files) { return service.teacherPublish(classId,request,files); }
+            @RequestPart(value="files",required=false) List<MultipartFile> files,
+            @RequestHeader(value="X-Offline-Publication-Id",required=false) UUID operation) {
+        return delivery.deliver(guard.currentUserId(), operation, "teacher-publication/" + classId, request, files,
+                new TypeReference<Post>() {}, () -> service.teacherPublish(classId,request,files));
+    }
     @DeleteMapping("/me/teacher/classes/{classId}/portal/posts/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void teacherDelete(@PathVariable Long classId,@PathVariable Long id) { service.teacherDelete(classId,id); }

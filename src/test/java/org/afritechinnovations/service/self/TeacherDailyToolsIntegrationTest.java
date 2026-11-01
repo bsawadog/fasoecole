@@ -83,7 +83,7 @@ class TeacherDailyToolsIntegrationTest {
   assertEquals(1,service.support(105L,301L).stream().filter(s->s.studentId()==703L).findFirst().orElseThrow().overdue());
  }
  @Test void todayIncludesEffectiveCoursesAndPrivateDueRemindersAndDoesNotInventMissingNotes(){
-  when(teacher.classes(105L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(301L,"CM1",null,101L,"A",401L,"Test",true,2,List.of())));
+  when(teacher.classes(105L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(301L,"CM1",null,101L,"A",401L,"Test",true,2,List.of(),null,null)));
   jdbc.update("INSERT INTO teacher_schedule_slots(teacher_id,class_id,day_of_week,start_time,end_time,effective_from) VALUES(201,301,?,'09:00','10:00',CURRENT_DATE-1),(201,301,?,'11:00','12:00',CURRENT_DATE+1)",today.getDayOfWeek().getValue(),today.getDayOfWeek().getValue());
   service.note(105L,null,new NoteRequest("Rappel dû","Texte",today.minusDays(1),false));service.note(105L,null,new NoteRequest("Plus tard","Texte",today.plusDays(1),false));
   var day=service.today(105L);assertEquals(1,day.lessons().size());assertEquals(1,day.reminders().size());assertEquals(0,day.tasks().getFirst().count());assertEquals(0,day.tasks().getLast().count());
@@ -94,7 +94,7 @@ class TeacherDailyToolsIntegrationTest {
   assertThrows(IllegalArgumentException.class,()->service.availability(105L,new AvailabilityRequest(201L,start,start,"Motif",true)));verifyNoInteractions(messages);
  }
  @Test void indicativeGradesNormalizeOnlyOwnEvaluationsAndMissingMarksAreNotZeros(){
-  when(teacher.classes(105L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(301L,"CM1",null,101L,"A",401L,"Test",true,2,List.of())));
+  when(teacher.classes(105L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(301L,"CM1",null,101L,"A",401L,"Test",true,2,List.of(),null,null)));
   jdbc.update("INSERT INTO grade_periods(id,school_id,academic_year_id,code,name,start_date,end_date) VALUES(901,101,401,'T1','Trimestre',CURRENT_DATE-365,CURRENT_DATE+365) ON CONFLICT DO NOTHING");
   jdbc.update("INSERT INTO evaluations(id,class_subject_teacher_id,period_id,title,type,eval_date) VALUES(911,601,901,'Own','TEST',CURRENT_DATE),(912,602,901,'Other','TEST',CURRENT_DATE),(913,601,901,'Future','TEST',CURRENT_DATE+1)");
   jdbc.update("INSERT INTO grades(student_id,class_subject_teacher_id,term,type,value,max_value,evaluation_id) VALUES(701,601,'T1','TEST',16,40,911),(701,602,'T1','TEST',20,20,912)");

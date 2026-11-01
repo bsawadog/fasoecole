@@ -72,10 +72,36 @@ class TeacherSpaceServiceTest {
 
     @Test
     void listsOnlyTheClassesAndSubjectsOfTheTeacher() {
+        year.setStartDate(LocalDate.of(2026, 9, 1));
+        year.setEndDate(LocalDate.of(2027, 7, 31));
         var result = service.classes(5L);
         assertEquals(1, result.size());
         assertEquals("CM1", result.get(0).className());
+        assertEquals(year.getStartDate(), result.get(0).academicYearStartDate());
+        assertEquals(year.getEndDate(), result.get(0).academicYearEndDate());
         assertEquals(List.of("Maths"), result.get(0).subjects().stream().map(s -> s.subjectName()).toList());
+    }
+
+    @Test
+    void explainsTheClassAcademicYearWhenAnAttendanceDateIsOutsideItsBounds() {
+        year.setStartDate(LocalDate.of(2020, 9, 1));
+        year.setEndDate(LocalDate.of(2021, 7, 31));
+        var error = assertThrows(IllegalArgumentException.class, () -> service.saveAttendanceBatch(5L, 10L,
+                new org.afritechinnovations.dto.self.TeacherAttendanceDto.Batch(LocalDate.of(2021, 8, 1), List.of())));
+        assertTrue(error.getMessage().contains("01/08/2021"));
+        assertTrue(error.getMessage().contains("01/09/2020"));
+        assertTrue(error.getMessage().contains("31/07/2021"));
+        assertTrue(error.getMessage().contains("CM1"));
+    }
+
+    @Test
+    void explainsTheServerDateWhenAnAttendanceDateIsInTheFuture() {
+        year.setStartDate(LocalDate.now().minusDays(10));
+        year.setEndDate(LocalDate.now().plusDays(10));
+        var error = assertThrows(IllegalArgumentException.class, () -> service.saveAttendanceBatch(5L, 10L,
+                new org.afritechinnovations.dto.self.TeacherAttendanceDto.Batch(LocalDate.now().plusDays(1), List.of())));
+        assertTrue(error.getMessage().contains("dans le futur"));
+        assertTrue(error.getMessage().contains("date actuelle du serveur"));
     }
 
     @Test

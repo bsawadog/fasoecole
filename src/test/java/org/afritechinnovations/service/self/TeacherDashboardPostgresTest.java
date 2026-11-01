@@ -15,7 +15,7 @@ class TeacherDashboardPostgresTest {
  SingleConnectionDataSource source;JdbcTemplate jdbc;TeacherSpaceService teacher;TeacherDashboardService service;
  @BeforeEach void setup(){
   source=new SingleConnectionDataSource(System.getProperty("dashboardChartTestUrl"),"chart_test","chart_test_only",true);jdbc=new JdbcTemplate(source);teacher=mock(TeacherSpaceService.class);service=new TeacherDashboardService(jdbc,teacher);
-  when(teacher.classes(5L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(11L,"CP1",null,1L,"Ecole",1L,"2026-2027",true,3,List.of())));
+  when(teacher.classes(5L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(11L,"CP1",null,1L,"Ecole",1L,"2026-2027",true,3,List.of(),null,null)));
   jdbc.execute("CREATE TEMP TABLE academic_years(id BIGINT,start_date DATE,end_date DATE,closed_at TIMESTAMP)");
   jdbc.execute("CREATE TEMP TABLE classes(id BIGINT,school_id BIGINT,academic_year_id BIGINT)");
   jdbc.execute("CREATE TEMP TABLE students(id BIGINT,school_id BIGINT)");
@@ -47,5 +47,5 @@ class TeacherDashboardPostgresTest {
  @Test void normalizesGradesAndCountsRealZerosButNotMissingOrInvalidGrades(){var marks=dashboard(null).marks();assertEquals(1L,marks.evaluationId());assertEquals(2,marks.evaluations().size());assertEquals(3,marks.count());assertEquals(0,new BigDecimal("9.33").compareTo(marks.average()));assertEquals(List.of(1L,0L,1L,0L,1L),marks.buckets().stream().map(TeacherDashboardService.Bucket::count).toList());var empty=dashboard(2L).marks();assertEquals(0,empty.count());assertNull(empty.average());}
  @Test void countsOnlyOwnHomeworkRecipientsAndDeduplicatesEnrollments(){var h=dashboard(null).homework();assertEquals(2,h.todo());assertEquals(1,h.submitted());assertEquals(1,h.corrected());assertEquals(1,h.overdue());}
  @Test void rejectsAnotherClassOrTeachersEvaluation(){assertThrows(AccessDeniedException.class,()->service.overview(5L,12L,null));assertThrows(AccessDeniedException.class,()->dashboard(3L));assertThrows(AccessDeniedException.class,()->dashboard(4L));}
- @Test void supportsNoClassesAndFutureYearsWithoutFakeAttendance(){when(teacher.classes(5L)).thenReturn(List.of());assertNull(service.overview(5L,null,null).classId());when(teacher.classes(5L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(11L,"CP1",null,1L,"Ecole",1L,"2026-2027",true,3,List.of())));jdbc.update("UPDATE academic_years SET start_date='2027-01-01' WHERE id=1");assertTrue(dashboard(null).weeks().isEmpty());}
+ @Test void supportsNoClassesAndFutureYearsWithoutFakeAttendance(){when(teacher.classes(5L)).thenReturn(List.of());assertNull(service.overview(5L,null,null).classId());when(teacher.classes(5L)).thenReturn(List.of(new SelfServiceDto.TeacherClass(11L,"CP1",null,1L,"Ecole",1L,"2026-2027",true,3,List.of(),null,null)));jdbc.update("UPDATE academic_years SET start_date='2027-01-01' WHERE id=1");assertTrue(dashboard(null).weeks().isEmpty());}
 }

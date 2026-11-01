@@ -5,6 +5,9 @@ import lombok.RequiredArgsConstructor;
 import org.afritechinnovations.dto.communication.FamilyContactDto;
 import org.afritechinnovations.security.AccessGuard;
 import org.afritechinnovations.service.communication.ConversationMessagingService;
+import org.afritechinnovations.service.communication.MessageDeliveryService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +26,7 @@ import java.util.List;
 public class ConversationMessagingController {
     private final ConversationMessagingService service;
     private final AccessGuard guard;
+    private final MessageDeliveryService delivery;
 
     @GetMapping
     public List<FamilyContactDto.ConversationSummary> list(@RequestParam(required = false) Long schoolId) {
@@ -44,16 +48,20 @@ public class ConversationMessagingController {
     @PostMapping(value = "/teacher/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public List<FamilyContactDto.ConversationSummary> sendTeacherMessage(
-            @Valid @RequestBody FamilyContactDto.TeacherMessageRequest request) {
-        return service.sendTeacherMessage(guard.currentUserId(), request, List.of());
+            @Valid @RequestBody FamilyContactDto.TeacherMessageRequest request,
+            @RequestHeader(value = "X-Offline-Message-Id", required = false) UUID operation) {
+        Long user = guard.currentUserId();
+        return delivery.deliver(user, operation, "teacher", request, List.of(), new TypeReference<>() {}, () -> service.sendTeacherMessage(user, request, List.of()));
     }
 
     @PostMapping(value = "/teacher/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public List<FamilyContactDto.ConversationSummary> sendTeacherMessageWithFiles(
             @Valid @RequestPart("request") FamilyContactDto.TeacherMessageRequest request,
-            @RequestPart(value = "files", required = false) List<MultipartFile> files) {
-        return service.sendTeacherMessage(guard.currentUserId(), request, files);
+            @RequestPart(value = "files", required = false) List<MultipartFile> files,
+            @RequestHeader(value = "X-Offline-Message-Id", required = false) UUID operation) {
+        Long user = guard.currentUserId();
+        return delivery.deliver(user, operation, "teacher", request, files, new TypeReference<>() {}, () -> service.sendTeacherMessage(user, request, files));
     }
 
     @GetMapping("/unread-count")
@@ -61,8 +69,10 @@ public class ConversationMessagingController {
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
-    public FamilyContactDto.ConversationThread start(@Valid @RequestBody FamilyContactDto.NewConversationRequest request) {
-        return service.start(guard.currentUserId(), request);
+    public FamilyContactDto.ConversationThread start(@Valid @RequestBody FamilyContactDto.NewConversationRequest request,
+            @RequestHeader(value = "X-Offline-Message-Id", required = false) UUID operation) {
+        Long user = guard.currentUserId();
+        return delivery.deliver(user, operation, "start", request, List.of(), new TypeReference<>() {}, () -> service.start(user, request));
     }
 
     @GetMapping("/{conversationId}")
@@ -72,23 +82,29 @@ public class ConversationMessagingController {
 
     @PostMapping(value = "/{conversationId}/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
     public FamilyContactDto.ConversationThread reply(@PathVariable Long conversationId,
-                                                      @Valid @RequestBody FamilyContactDto.ReplyRequest request) {
-        return service.reply(guard.currentUserId(), conversationId, request);
+                                                      @Valid @RequestBody FamilyContactDto.ReplyRequest request,
+            @RequestHeader(value = "X-Offline-Message-Id", required = false) UUID operation) {
+        Long user = guard.currentUserId();
+        return delivery.deliver(user, operation, "reply/" + conversationId, request, List.of(), new TypeReference<>() {}, () -> service.reply(user, conversationId, request));
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public FamilyContactDto.ConversationThread startWithFiles(
             @Valid @RequestPart("request") FamilyContactDto.NewConversationRequest request,
-            @RequestPart(value = "files", required = false) List<MultipartFile> files) {
-        return service.startWithAttachments(guard.currentUserId(), request, files);
+            @RequestPart(value = "files", required = false) List<MultipartFile> files,
+            @RequestHeader(value = "X-Offline-Message-Id", required = false) UUID operation) {
+        Long user = guard.currentUserId();
+        return delivery.deliver(user, operation, "start", request, files, new TypeReference<>() {}, () -> service.startWithAttachments(user, request, files));
     }
 
     @PostMapping(value = "/{conversationId}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FamilyContactDto.ConversationThread replyWithFiles(@PathVariable Long conversationId,
             @Valid @RequestPart("request") FamilyContactDto.ReplyRequest request,
-            @RequestPart(value = "files", required = false) List<MultipartFile> files) {
-        return service.replyWithAttachments(guard.currentUserId(), conversationId, request, files);
+            @RequestPart(value = "files", required = false) List<MultipartFile> files,
+            @RequestHeader(value = "X-Offline-Message-Id", required = false) UUID operation) {
+        Long user = guard.currentUserId();
+        return delivery.deliver(user, operation, "reply/" + conversationId, request, files, new TypeReference<>() {}, () -> service.replyWithAttachments(user, conversationId, request, files));
     }
 
     @GetMapping("/attachments/{attachmentId}")

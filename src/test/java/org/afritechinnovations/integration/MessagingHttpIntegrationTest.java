@@ -71,6 +71,92 @@ class MessagingHttpIntegrationTest {
         return result.getBody().get(0).get("id").asLong();
     }
 
+    @Test void queuedMessageRetriesAndRepliesCommitOnlyOnce() {
+        String operation = java.util.UUID.randomUUID().toString();
+        var headers = teacher(); headers.set("X-Offline-Message-Id", operation);
+        var request = new HttpEntity<>(message(List.of(2203L)), headers);
+        var first = http.exchange("/api/conversations/teacher/messages", HttpMethod.POST, request, JsonNode.class);
+        var retry = http.exchange("/api/conversations/teacher/messages", HttpMethod.POST, request, JsonNode.class);
+        assertEquals(HttpStatus.CREATED, first.getStatusCode(), () -> String.valueOf(first.getBody()));
+        assertEquals(first.getBody(), retry.getBody());
+        long conversation = first.getBody().get(0).get("id").asLong();
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM offline_message_receipts WHERE user_id=2202 AND operation_id=?::uuid", Integer.class, operation));
+        var changed = new java.util.LinkedHashMap<String,Object>(message(List.of(2203L))); changed.put("content", "Autre message");
+        assertEquals(HttpStatus.BAD_REQUEST, http.exchange("/api/conversations/teacher/messages", HttpMethod.POST, new HttpEntity<>(changed, headers), JsonNode.class).getStatusCode());
+        var other = parent(); other.set("X-Offline-Message-Id", operation);
+        assertEquals(HttpStatus.FORBIDDEN, http.exchange("/api/conversations/teacher/messages", HttpMethod.POST, new HttpEntity<>(message(List.of(2203L)), other), JsonNode.class).getStatusCode());
+        headers.set("X-Offline-Message-Id", java.util.UUID.randomUUID().toString());
+        var reply = new HttpEntity<>(Map.of("content", "Réponse hors connexion"), headers);
+        String path = "/api/conversations/" + conversation + "/messages";
+        var answer = http.exchange(path, HttpMethod.POST, reply, JsonNode.class);
+        assertEquals(HttpStatus.OK, answer.getStatusCode());
+        assertEquals(answer.getBody(), http.exchange(path, HttpMethod.POST, reply, JsonNode.class).getBody());
+        assertEquals(2, answer.getBody().get("messages").size());
+    }
+    @Test void simultaneousTabsReceiveTheSameDeliveryReceipt() throws Exception {
+        String operation = java.util.UUID.randomUUID().toString();
+        var headers = teacher(); headers.set("X-Offline-Message-Id", operation);
+        var request = new HttpEntity<>(message(List.of(2203L)), headers);
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var start = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.Callable<ResponseEntity<JsonNode>> send = () -> {
+                start.await();
+                return http.exchange("/api/conversations/teacher/messages", HttpMethod.POST, request, JsonNode.class);
+            };
+            var first = executor.submit(send); var second = executor.submit(send); start.countDown();
+            var a = first.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            var b = second.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(HttpStatus.CREATED, a.getStatusCode()); assertEquals(HttpStatus.CREATED, b.getStatusCode());
+            assertEquals(a.getBody(), b.getBody());
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM offline_message_receipts WHERE user_id=2202 AND operation_id=?::uuid", Integer.class, operation));
+        }
+    }
+
+    @Test void offlineKeysAreStablePerUserAndDeviceAndNeverCacheable() {
+        String device = java.util.UUID.randomUUID().toString();
+        String url = "/api/me/offline-devices/" + device + "/key";
+        var first = http.exchange(url, HttpMethod.POST, new HttpEntity<>(Map.of(), teacher()), JsonNode.class);
+        var again = http.exchange(url, HttpMethod.POST, new HttpEntity<>(Map.of(), teacher()), JsonNode.class);
+        var another = http.exchange(url, HttpMethod.POST, new HttpEntity<>(Map.of(), parent()), JsonNode.class);
+        assertEquals(HttpStatus.OK, first.getStatusCode());
+        assertTrue(first.getHeaders().getCacheControl().contains("no-store"));
+        assertEquals(32, java.util.Base64.getDecoder().decode(first.getBody().get("key").asText()).length);
+        assertEquals(first.getBody(), again.getBody());
+        assertNotEquals(first.getBody(), another.getBody());
+        assertEquals(HttpStatus.UNAUTHORIZED, http.postForEntity(url, Map.of(), String.class).getStatusCode());
+    }
+
+    @Test void offlineAttendanceRetriesAreIdempotentAndRejectChangedDataAndOtherActors() {
+        String date = java.time.LocalDate.now().toString();
+        String url = "/api/me/teacher/classes/2003/attendance";
+        var loaded = http.exchange(url + "?date=" + date, HttpMethod.GET, new HttpEntity<>(teacher()), JsonNode.class);
+        assertEquals(HttpStatus.OK, loaded.getStatusCode());
+        JsonNode baseline = loaded.getBody().get(0);
+        var entry = new java.util.LinkedHashMap<String, Object>();
+        entry.put("studentId", 2005L); entry.put("status", "ABSENT"); entry.put("justification", "Appel hors connexion");
+        entry.put("expectedStatus", baseline.get("status").isNull() ? null : baseline.get("status").asText());
+        entry.put("expectedJustification", baseline.get("justification").isNull() ? null : baseline.get("justification").asText());
+        entry.put("expectedVersion", baseline.get("version").isNull() ? null : baseline.get("version").asLong());
+        String operation = java.util.UUID.randomUUID().toString();
+        var payload = new java.util.LinkedHashMap<String, Object>(Map.of("operationId", operation, "date", date, "entries", List.of(entry)));
+        for (int attempt = 0; attempt < 2; attempt++) {
+            var response = http.exchange(url + "/sync", HttpMethod.PUT, new HttpEntity<>(payload, teacher()), JsonNode.class);
+            assertEquals(HttpStatus.OK, response.getStatusCode(), () -> String.valueOf(response.getBody()));
+        }
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM offline_attendance_receipts WHERE user_id=2202 AND operation_id=?::uuid", Integer.class, operation));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM attendances WHERE class_id=2003 AND student_id=2005 AND attendance_date=?::date", Integer.class, date));
+        jdbc.update("UPDATE attendances SET justification='Correction en ligne', version=version+1 WHERE class_id=2003 AND student_id=2005 AND attendance_date=?::date", date);
+        var replay = http.exchange(url + "/sync", HttpMethod.PUT, new HttpEntity<>(payload, teacher()), JsonNode.class);
+        assertEquals(HttpStatus.OK, replay.getStatusCode());
+        assertEquals("Appel hors connexion", replay.getBody().get(0).get("justification").asText());
+        assertEquals("Correction en ligne", jdbc.queryForObject("SELECT justification FROM attendances WHERE class_id=2003 AND student_id=2005 AND attendance_date=?::date", String.class, date));
+        payload.put("operationId", java.util.UUID.randomUUID().toString());
+        var conflict = http.exchange(url + "/sync", HttpMethod.PUT, new HttpEntity<>(payload, teacher()), JsonNode.class);
+        assertEquals(HttpStatus.BAD_REQUEST, conflict.getStatusCode());
+        assertEquals("Correction en ligne", jdbc.queryForObject("SELECT justification FROM attendances WHERE class_id=2003 AND student_id=2005 AND attendance_date=?::date", String.class, date));
+        assertEquals(HttpStatus.FORBIDDEN, http.exchange(url + "/sync", HttpMethod.PUT, new HttpEntity<>(payload, parent()), String.class).getStatusCode());
+    }
+
     @Test void teacherSendsAndParentReadsAndRepliesThroughRealHttp() {
         var recipients=http.exchange("/api/conversations/teacher/recipients?schoolId=2001&classId=2003",HttpMethod.GET,new HttpEntity<>(teacher()),JsonNode.class);
         assertEquals(HttpStatus.OK,recipients.getStatusCode());

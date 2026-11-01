@@ -74,14 +74,13 @@ public class TeacherSpaceService {
         return roster(classId).stream().map(enrollment -> {
             var student = enrollment.getStudent(); var row = recorded.get(student.getId());
             return new org.afritechinnovations.dto.self.TeacherAttendanceDto.Item(student.getId(), student.getFullName(),
-                    student.getRegistrationNumber(), row == null ? null : row.getStatus(), row == null ? null : row.getJustification());
+                    student.getRegistrationNumber(), row == null ? null : row.getStatus(), row == null ? null : row.getJustification(), row == null ? null : row.getVersion());
         }).toList();
     }
 
     public void saveAttendance(Long userId, Long classId, Long studentId, org.afritechinnovations.dto.self.TeacherAttendanceDto.Request request) {
         SchoolClass schoolClass = requireTaughtClass(userId, classId);
-        if (request.date().isBefore(schoolClass.getAcademicYear().getStartDate()) || request.date().isAfter(schoolClass.getAcademicYear().getEndDate()))
-            throw new IllegalArgumentException("La date doit appartenir à l'année scolaire de la classe");
+        validateAttendanceDate(schoolClass, request.date());
         var enrollment = roster(classId).stream().filter(e -> e.getStudent().getId().equals(studentId)).findFirst()
                 .orElseThrow(() -> new AccessDeniedException("Cet élève n'est pas inscrit dans votre classe"));
         Attendance attendance = attendanceRepository.findByStudentIdAndSchoolClassIdAndAttendanceDate(studentId,classId,request.date())
@@ -94,8 +93,7 @@ public class TeacherSpaceService {
     /** Validate the complete call before writing; a failed row rolls back the entire call. */
     public List<org.afritechinnovations.dto.self.TeacherAttendanceDto.Item> saveAttendanceBatch(Long userId,Long classId,org.afritechinnovations.dto.self.TeacherAttendanceDto.Batch request) {
         SchoolClass cls=requireTaughtClass(userId,classId);
-        if(request.date()==null || request.date().isAfter(LocalDate.now()) || request.date().isBefore(cls.getAcademicYear().getStartDate()) || request.date().isAfter(cls.getAcademicYear().getEndDate()))
-            throw new IllegalArgumentException("Choisissez une date passée ou actuelle dans l’année scolaire de la classe.");
+        validateAttendanceDate(cls, request.date());
         if(request.entries()==null || request.entries().isEmpty() || request.entries().size()>2000)throw new IllegalArgumentException("Appel vide ou trop volumineux.");
         var students=roster(classId).stream().collect(Collectors.toMap(e->e.getStudent().getId(),e->e.getStudent()));
         var recorded=attendanceRepository.findByClassBetween(classId,request.date(),request.date()).stream().collect(Collectors.toMap(a->a.getStudent().getId(),a->a,(a,b)->b));
@@ -115,6 +113,20 @@ public class TeacherSpaceService {
             attendanceRepository.save(attendance);
         }
         return attendance(userId,classId,request.date());
+    }
+
+    private void validateAttendanceDate(SchoolClass cls, LocalDate date) {
+        if (date == null) throw new IllegalArgumentException("Choisissez la date de l’appel.");
+        var format = java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy");
+        var year = cls.getAcademicYear();
+        if (date.isBefore(year.getStartDate()) || date.isAfter(year.getEndDate()))
+            throw new IllegalArgumentException("L’appel du " + date.format(format) + " est hors de l’année scolaire « "
+                    + year.getLabel() + " » de la classe « " + cls.getName() + " » (du "
+                    + year.getStartDate().format(format) + " au " + year.getEndDate().format(format)
+                    + "). Choisissez une date dans cette période ou vérifiez la configuration de l’année scolaire.");
+        var today = LocalDate.now();
+        if (date.isAfter(today)) throw new IllegalArgumentException("L’appel du " + date.format(format)
+                + " est dans le futur. La date actuelle du serveur est le " + today.format(format) + ".");
     }
 
     // ------------------------------------------------------------------ classes et élèves
@@ -137,7 +149,8 @@ public class TeacherSpaceService {
                             cls.getLevel() == null ? null : cls.getLevel().getName(), cls.getSchool().getId(),
                             cls.getSchool().getName(), cls.getAcademicYear().getId(),
                             cls.getAcademicYear().getLabel(), Boolean.TRUE.equals(cls.getAcademicYear().getIsCurrent()),
-                            roster(cls.getId()).size(), subjects);
+                            roster(cls.getId()).size(), subjects,
+                            cls.getAcademicYear().getStartDate(), cls.getAcademicYear().getEndDate());
                 })
                 .sorted(Comparator.comparing(SelfServiceDto.TeacherClass::currentYear).reversed()
                         .thenComparing(SelfServiceDto.TeacherClass::schoolName, String.CASE_INSENSITIVE_ORDER)
